@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "react-query";
 import RepoStatsTable from "./RepoStatsTable";
+import DateRangeInputs from "./DateRangeInputs";
+import TotalStats from "./TotalStats";
+import FetchButton from "./FetchButton";
 import { fetchRepos, fetchCommits, calculateTotalChanges } from "./api";
 
 const Stats = ({ username, token, privateRepos }) => {
@@ -15,27 +18,25 @@ const Stats = ({ username, token, privateRepos }) => {
   const [endDate, setEndDate] = useState(defaultEndDate);
   const [totalAdditions, setTotalAdditions] = useState(0);
   const [totalDeletions, setTotalDeletions] = useState(0);
-  const [totalCommits, setTotalCommits] = useState(0); // New state for total commits
-  const [isButtonClicked, setIsButtonClicked] = useState(false); // State to track button click
+  const [totalCommits, setTotalCommits] = useState(0);
+  const [totalRepos, setTotalRepos] = useState(0);
+  const [fetchEnabled, setFetchEnabled] = useState(false); // State to control fetch behavior
 
-  // Fetch repositories (public repos from the API)
   const { data: repos, isLoading: reposLoading, error: reposError } = useQuery(
     ["repos", username],
     () => fetchRepos(username, token)
   );
 
-  // Only combine public repos with private repos once public repos are loaded
   const allRepos = repos ? [...repos, ...privateRepos.map((repoName) => ({ name: repoName }))] : [];
 
-  // Fetch stats for each repository only once public repos are fetched and button is clicked
   const repoStatsQuery = useQuery(
     ["repoStats", username, startDate, endDate],
     async () => {
-      if (!allRepos.length) return []; // Only proceed if repos are loaded
+      if (!allRepos.length) return [];
 
       let additionsSum = 0;
       let deletionsSum = 0;
-      let commitsCount = 0; // Counter for total commits
+      let commitsCount = 0;
 
       const repoStatsPromises = allRepos.map(async (repo) => {
         if (repo.size === 0) {
@@ -43,7 +44,6 @@ const Stats = ({ username, token, privateRepos }) => {
           return { repoName: repo.name, totalChanges: { additions: 0, deletions: 0 }, commits: 0 };
         }
 
-        // Fetch and filter commits by date range
         const commits = await fetchCommits(username, repo.name, token);
         const filteredCommits = commits.filter((commit) => {
           const commitDate = new Date(commit.commit.author.date);
@@ -53,10 +53,8 @@ const Stats = ({ username, token, privateRepos }) => {
           );
         });
 
-        // Count the commits for this repo in the date range
         commitsCount += filteredCommits.length;
 
-        // Calculate total changes for filtered commits
         const totalChanges = await calculateTotalChanges(username, repo.name, filteredCommits, token);
         additionsSum += totalChanges.additions;
         deletionsSum += totalChanges.deletions;
@@ -66,24 +64,44 @@ const Stats = ({ username, token, privateRepos }) => {
 
       const repoStats = await Promise.all(repoStatsPromises);
 
-      // Filter out repositories with no additions or deletions
       const filteredRepoStats = repoStats.filter(
         (repo) => repo.totalChanges.additions > 0 || repo.totalChanges.deletions > 0
       );
 
+      setTotalRepos(filteredRepoStats.length);
+
       setTotalAdditions(additionsSum);
       setTotalDeletions(deletionsSum);
-      setTotalCommits(commitsCount); // Update total commits
+      setTotalCommits(commitsCount);
 
-      return filteredRepoStats; // Return the filtered repo stats
+      return filteredRepoStats;
     },
     {
-      enabled: isButtonClicked && !!startDate && !!endDate && !!repos, // Enable only if button clicked and dates set
+      enabled: fetchEnabled && !!startDate && !!endDate && !!repos, // Only enable the query after the button is clicked
     }
   );
 
   const handleFetchButtonClick = () => {
-    setIsButtonClicked(true); // Set button click state to true
+    setTotalAdditions(0);
+    setTotalDeletions(0);
+    setTotalCommits(0);
+    setTotalRepos(0);
+
+    setFetchEnabled(true); // Enable fetching after button click
+  };
+
+  const handleDateChange = (newStartDate, newEndDate) => {
+    setStartDate(newStartDate);
+    setEndDate(newEndDate);
+
+    // Reset stats when date changes
+    setTotalAdditions(0);
+    setTotalDeletions(0);
+    setTotalCommits(0);
+    setTotalRepos(0);
+
+    // Disable fetching until button is clicked again
+    setFetchEnabled(false);
   };
 
   if (reposLoading) return <div>Loading repositories...</div>;
@@ -95,35 +113,21 @@ const Stats = ({ username, token, privateRepos }) => {
   return (
     <div>
       <h1>Repository Commit Stats</h1>
-      {/* Date Range Inputs */}
-      <div>
-        <label>
-          Start Date:
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-          />
-        </label>
-        <label>
-          End Date:
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-          />
-        </label>
-      </div>
-      {/* Fetch Button */}
-      <button onClick={handleFetchButtonClick}>Fetch Stats</button>
+      <DateRangeInputs
+        startDate={startDate}
+        endDate={endDate}
+        setStartDate={(newStartDate) => handleDateChange(newStartDate, endDate)}
+        setEndDate={(newEndDate) => handleDateChange(startDate, newEndDate)}
+      />
+      <FetchButton onClick={handleFetchButtonClick} />
 
-      {/* Total Metrics */}
-      <div>
-        <h3>Total Modifications: {totalAdditions + totalDeletions}</h3>
-        <h3>Total Additions: {totalAdditions}</h3>
-        <h3>Total Deletions: {totalDeletions}</h3>
-        <h3>Total Commits: {totalCommits}</h3> {/* Display total commits */}
-      </div>
+      <TotalStats
+        totalAdditions={totalAdditions}
+        totalDeletions={totalDeletions}
+        totalCommits={totalCommits}
+        totalRepos={totalRepos}
+      />
+
       <RepoStatsTable repoStats={repoStatsQuery.data || []} />
     </div>
   );
