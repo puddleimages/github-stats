@@ -112,7 +112,7 @@ const Stats = ({ username, token, privateRepos }) => {
 
   return (
     <div>
-      <h1>Repository Commit Stats</h1>
+      <h1>GitHub Stats</h1>
       <DateRangeInputs
         startDate={startDate}
         endDate={endDate}
